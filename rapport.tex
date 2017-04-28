@@ -2,7 +2,7 @@
 \usepackage[utf8]{inputenc}
 
 \title{Travail pratique \#3 - IFT-2245 - Rapport}
-\author{Ahmed Medhat (x) \and Youssef Zaki (20052467)}
+\author{Ahmed Medhat (20024603) \and Youssef Zaki (20052467)}
 
 \begin{document}
 
@@ -10,9 +10,7 @@
 
 \section{Objectifs}
 
-Ce TP vise a nous familiarisé avec la programmation système dans un système 
-d'exploitation de style POSIX.
-
+Ce TP vise a nous familiarisé avec le fonctionnement du mémoire virtuelle et les algorithmes du remplacement des pages mémoire dans un système d'exploitation de style POSIX.\\
 \begin{enumerate}
 \item Parfaire notre connaissance de Python et POSIX.
 \item Lire, trouver et comprendre cette donnée.
@@ -27,12 +25,12 @@ aside Buffer) et une table de pages (page table).
 
 
 \section{Description de l'implantation}
-A fin de créer notre programme, on a du implémenter les fonctions vmm.c, pm.c, pt.c et tlb.c y compris l'implémentation de l'algorithme de remplacement du TLB "Second Chance" avec un bit de référence pour vérifier si la page dans "Page Table" a été accédée ou pas ainsi que la gestion de l'état "dirty" des pages.
+A fin de créer notre programme, on a du implémenter les fonctions vmm.c, pm.c, pt.c et tlb.c y compris l'implémentation de l'algorithme de remplacement de la table des pages "Second Chance" avec un bit de référence pour vérifier si la page dans "Page Table" a été accédée ou pas ainsi que la gestion de l'état "dirty" des pages.Même pour le remplacement des pages dans le TLB avec l'algorithme LRU.\\
 Finalement, a fin de tester l'efficaité de notre programme, on a du fournir deux fichiers command1.in et command2.in qui testent la performance du TLB et l'algorithme de remplacement des pages consécutivement.
 
 
 \section*{I. Paging \& Paging Demand}
-Pour implémenter le schème du paging, on a du utilisé un TLB qui fonctionne comme une mémoire cache initialement vide dans lequel on stock les frames qu'on vient d'accéder. Puis, le page table qui fonctionne comme un convertisseur des adressess logique à physique, nous permettant d'obtenir la frame correspondante dans la mémoire physique au cas où la page demandée n'était pas cachée ou bien a été supprimée du TLB.
+Pour implémenter le schème du paging, un TLB et une table de pages qui fonctionnent comme 2 niveaux de mémoire cache initialement vide dans lequels on stock les frames qu'on vient d'accéder sous forme des adresses logiques. Leur rôle est convertir des adressess logique à physique, nous permettant d'obtenir la frame correspondante dans la mémoire physique au cas où la page demandée n'était pas cachée ou bien a été supprimée du TLB ou du table des pages.
 Pour la structure de la TLB, on a utilisé :-
 \begin{enumerate}
 	\item Page Number
@@ -52,19 +50,54 @@ Or, pour chaque entré, on associe ces trois attributs avec lesquels on vérifie
 
 \section*{II. Algorithme \& Page replacement}
 
-Pour gérer le remplacement des pages dans le TLB, on utilisé l'algorithme "Least Recently Used" qui détecte la page qui demeurait longtemps inutilisé avec le counter tlb\_lru\_counter pour qu'elle soit remplacé avec la nouvelle page récemment appelé en appellant la fonction tlb\_add\_entry.
+Pour gérer le remplacement des pages dans le TLB, on utilisé l'algorithme "FIFO (first in first out)".
+Dans l'autre coté, on a utilisé l'algorithme "Second Chance" dans la table des pages.
+\subsection{Stratégies de remplacement}
+\subsubsection{FIFO}
+Pour l’algorithme FIFO(first-in, first-out), la plus vieille page dans le TLB est celle qui est remplacée par la nouvelle qui prendra sa place. Un compteur
+fifo counter a été rajouté au TLB qui est incrémenté à chaque fois qu’une nou-
+velle page est inséré dans le TLB et chaque entrée du TLB a son numéro fifo
+qui permet de savoir sa position dans la file (plus le numéro est petit plus cette entrée est ancienne).
+\subsubsection*{Avantages}
+\begin{itemize}
+\item Simple et facile à implémenter
+\item Si on suppose qu’une fois une page utilisée, ses chances d’être réutilisée
+dans le futur sont faible, c’est un bon algorithme à utiliser.
+\end{itemize}
+\subsubsection*{Inconvenients}
+\begin{itemize}
+\item Concernant le 2e point, ce n’est pas le cas en pratique.
+\item Même si on utilise fréquemment une page, elle sera quand même
+remplacé dû à son ancienneté.
+\item D’une part, il se peut que la page soit un module d’initialisation
+qui a été utilisé il y a longtemps et dont nous n’avons plus be-
+soin, mais d’autre part, cette page pourrait contenir une variable
+couramment utilisée qui a été initialisée tôt dans le programme.
+C’est une situation dont l’algorithme ne tient pas compte. Toute-
+fois, l’exécution se passe correctement, elle est simplement ralentie
+lorsque nous remplaçons une page utilisée, car une faute est signalée
+presque immédiatement et la page est récupérée ensuite.
+\item Souffre de l’anomalie de Bellady
+\end{itemize}
+Dans ce cas taille de TLB est trés petit(8 entrées au total) et on n'a pas besoin à implémenter un algorithme plus complexe pour le gerer. L'algorithme détecte la page qui demeurait longtemps dans le TLB si jamais le TLB est plein avec le counter tlb\_fifo\_counter pour qu'elle soit remplacé avec la nouvelle page récemment appelé en appellant la fonction tlb\_add\_entry.
 
-Dans l'autre coté, on a utilisé l'algorithme "Second Chance" pour choisir la page victime qui sera remplacé lorsqu'il y a un page fault en appellant la fonction pt\_set\_entry.
-
-
-
-
+\subsubsection{Second Chance(CLOCK)}
+Pour l’algorithme Second chance c'est un algorithme un peu plus complexe mais plus efficace que les autres algorithmes de remplacement. Il consiste à avoir un bit referenced qui représente la dernière page référencé qui est mis à 0 si la page n'est pas récemment référencé et à 1 dans le cas inverse.
+Cet algorithme dégénère à FIFO si tous les bits sont tous à 0 (ou à 1) 
+\subsubsection*{Avantages}
+\begin{itemize}
+\item Plus efficace que les autres algorithmes
+\item Dans le cas de sous utilisation ou sur utilisation de la table de pages ou   l'algorithme devient FIFO qui est efficace et est un bon algorithme à utiliser dans ce cas.
+\item Évite les problèmes des autres algorithmes comparables comme LRU.
+\item Ne souffre pas de l'anomalie de Bellady
+\end{itemize}
+\subsubsection*{Inconvenients}
+\begin{itemize}
+\item Plus complexe à implémenter 
+\end{itemize}
+Dans ce cas taille de la table des pages on est en besoin d'un algorithme plus complexe et efficace et dans ce cas l'algorithme de Second chance est trés efficace à implémenter.Pour choisir la page victime qui sera remplacé lorsqu'il y a un page fault en appellant la fonction pt\_set\_entry
 
 \section*{III: Traitement de Page Fault}
-Dans le cas d'un TLB-miss, on appelle la fonction tlb\_lookup qui vérifie si la page voulue existe déjà dans notre table de pages. Si c'est le cas, on obtient directement le frame correspondant dans la mémoire physique. Sinon, on vérifie si la page se trouve dans le page table en appellant la fonction pt\_lookup. Dans le pire cas, un Page Fault est produit en appellant la fonction pageFault et on procède a lire une page dans un fichier BACKING\_STORE.txt et la stocker dans un frame disponible dans la mémoire physique initialement vide, toujours en mettant à jour notre TLB et la table de pages.
+On appelle la fonction tlb\_lookup pour vérifier si la page demandé est déjà dans TLB. Si oui c'est un TLB hit. Sinon, c'est un TLB miss et on appelle la fonction pt\_lookup pour chercher la page dans la table des pages. Si trouvé on le télécharge dans le TLB. Sinon, c'est un page fault. On appelle la fonction pageFault pour charger la page demandé du fichier backing\_store. Si, le frame associé à la page demandé contient des données on utilise l'algorithme de second chance pour choisir le victim à enlever. En après, on appele la fonction pm\_backup\_frame pour sauvegarder les données dans le frame victim dans backing\_store. Puis, on met le numéro du frame comme invalide avec la fonction pt\_set\_entry dans la table des pages. Puis, on télécharge le nouveau frame du backing\_store et on met à jour la table des pages ainsi que le TLB.
 
-
-\section*{IV: Bugs \&	 Difficultés rencontrées}
-
-\section*{V:Tests}
 \end{document}

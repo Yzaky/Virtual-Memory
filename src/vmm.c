@@ -13,122 +13,143 @@
 
 static unsigned int read_count = 0;
 static unsigned int write_count = 0;
-static FILE* vmm_log;
+static FILE *vmm_log;
+int count = 0;
 
-int pageFault(unsigned int page,bool write);
+int pageFault(unsigned int page, int frame, bool write);
+
 unsigned int next = 0;
 
-struct memory{
+struct memory {
     unsigned int pageNum;
     bool accessed;
 };
 
 struct memory virtualmem[NUM_FRAMES];
 
-void vmm_init (FILE *log)
-{
-  // Initialise le fichier de journal.
-  vmm_log = log;
+void vmm_init(FILE *log) {
+    // Initialise le fichier de journal.
+    vmm_log = log;
 }
 
 
-
 // NE PAS MODIFIER CETTE FONCTION
-static void vmm_log_command (FILE *out, const char *command,
-                             unsigned int laddress, /* Logical address. */
-		                    unsigned int page,
-                             unsigned int frame,
-                             unsigned int offset,
-                             unsigned int paddress, /* Physical address.  */
-		             char c) /* Caractère lu ou écrit.  */
+static void vmm_log_command(FILE *out, const char *command,
+                            unsigned int laddress, /* Logical address. */
+                            unsigned int page,
+                            unsigned int frame,
+                            unsigned int offset,
+                            unsigned int paddress, /* Physical address.  */
+                            char c) /* Caractère lu ou écrit.  */
 {
-  if (out)
-    fprintf (out, "%s[%c]@%05d: p=%d, o=%d, f=%d pa=%d\n", command, c, laddress,
-	     page, offset, frame, paddress);
+    if (out)
+        fprintf(out, "%s[%c]@%05d: p=%d, o=%d, f=%d pa=%d\n", command, c, laddress,
+                page, offset, frame, paddress);
 }
 
 /* Effectue une lecture à l'adresse logique `laddress`.  */
-char vmm_read (unsigned int laddress)
-{
-  char c = '!';
-  read_count++;
-  /* ¡ TODO: COMPLÉTER ! */
-  unsigned int offset = laddress & 255;
-  unsigned int page = laddress >> 8;
+char vmm_read(unsigned int laddress) {
+    char c = '!';
+    read_count++;
 
-  unsigned int frame = tlb_lookup(page,0);
-  if (frame == -1){
-    frame = pt_lookup(page);
-    if (frame!=-1){
-      tlb_add_entry(page,frame,0);
+    /* ¡ TODO: COMPLÉTER ! */
+    //Calcule de l'offset et page number
+    unsigned int offset = laddress & 255;
+    unsigned int page = laddress >> 8;
+
+    //Recherche du frame number dans TLB
+    unsigned int frame = tlb_lookup(page, 0);
+
+    //Si le frame n'est pas trouvé dans le TLB
+    if (frame == -1) {
+        //Recherche dans la table des pages
+        if ((frame = pt_lookup(page)) != -1) {
+            //Si trouvé dans la table des pages ajouter à TLB
+            tlb_add_entry(page, frame, 0);
+        } else {
+            //Sinon Page Fault
+            frame = pageFault(page, frame, 0);
+        }
     }
-    else {
-        frame = pageFault(page,0);
+    //Calcule l'adresse physique
+    unsigned int physaddress = (frame * PAGE_FRAME_SIZE) + offset;
+    //Lire le caractère de la mémoire physique
+    c = pm_read(physaddress);
 
-      }
-  }
-
-  unsigned int physaddress = (frame * PAGE_FRAME_SIZE) + offset;
-  c = pm_read(physaddress);
-
-  // TODO: Fournir les arguments manquants.
-  vmm_log_command (stdout, "READING", laddress, page, frame,offset,physaddress, c);
-  return c;
+    // TODO: Fournir les arguments manquants.
+    vmm_log_command(stdout, "READING", laddress, page, frame, offset, physaddress, c);
+    return c;
 }
 
 /* Effectue une écriture à l'adresse logique `laddress`.  */
-void vmm_write (unsigned int laddress, char c)
-{
-  write_count++;
-  /* ¡ TODO: COMPLÉTER ! */
+void vmm_write(unsigned int laddress, char c) {
+    write_count++;
+    /* ¡ TODO: COMPLÉTER ! */
 
-  unsigned int offset = laddress & 255;
-  unsigned int page = laddress >> 8;
+    //Calcule de l'offset et page number
+    unsigned int offset = laddress & 255;
+    unsigned int page = laddress >> 8;
 
-  unsigned int frame = tlb_lookup(page,0);
-  if (frame == -1){
-    frame = pt_lookup(page);
-    if (frame!=-1){
-      tlb_add_entry(page,frame,0);
+    //Recherche du frame number dans TLB
+    unsigned int frame = tlb_lookup(page, 1);
+
+    //Si le frame n'est pas trouvé dans le TLB
+    if (frame == -1) {
+        //Si trouvé dans la table des pages ajouter à TLB
+        if ((frame = pt_lookup(page)) != -1) {
+            //Si trouvé dans la table des pages ajouter à TLB
+            tlb_add_entry(page, frame, 1);
+        } else {
+            //Sinon Page Fault
+            frame = pageFault(page, frame, 1);
+        }
     }
-    else {
-      frame = pageFault(page,1);
-    }
-  }
+    //Calcule l'adresse physique
+    unsigned int physaddress = (frame * PAGE_FRAME_SIZE) + offset;
+    //Écrire le caractère fourni dans la mémoire physique
+    pm_write(physaddress, c);
+    //Mettre readonly à false (page modifié)
+    pt_set_readonly(page, 0);
 
-  unsigned int physaddress = (frame * PAGE_FRAME_SIZE) + offset;
-  pm_write(physaddress,c);
-  pt_set_readonly(page,0);
-  // TODO: Fournir les arguments manquants.
-  vmm_log_command (stdout, "WRITING", laddress,page, frame,offset,physaddress, c);
+    // TODO: Fournir les arguments manquants.
+    vmm_log_command(stdout, "WRITING", laddress, page, frame, offset, physaddress, c);
 }
 
-int pageFault(unsigned int page,bool write){
-  while (virtualmem[next].accessed == true){
-    virtualmem[next].accessed = false;
+//Page Fault
+int pageFault(unsigned int page, int frame, bool write) {
+    //Algorithme de remmplacement Second chance(Clock)
+    while (virtualmem[next].accessed == true) {
+        virtualmem[next].accessed = false;
+        next = (next + 1) % NUM_FRAMES;
+    }
+    //Trouver un frame avec accessed(referenced) = 0
+    frame = next;
+    int old = virtualmem[frame].pageNum;
+    //Si la page n'est pas vide déjà modifié(dirty bit)
+    if (old >= 0 && !pt_readonly_p(old)) {
+        //Copier le contenu de la page dans le backstore
+        pm_backup_frame(frame, old);
+        //Mettre la page à invalid
+        pt_unset_entry(old);
+    }
+    //Télécharger la page du backing store
+    pm_download_page(page, frame);
+    //Ajouter la page dans la table des pages
+    pt_set_entry(page, frame);
+    //Mettre la page à readonly
+    pt_set_readonly(page, 1);
+    //Ajouter la page à TLB
+    tlb_add_entry(page, frame, pt_readonly_p(page));
+    virtualmem[frame].pageNum = page;
+    virtualmem[frame].accessed = true;
     next = (next + 1) % NUM_FRAMES;
-  }
-  int frame = next;
-  int old = virtualmem[frame].pageNum;
-  if (old >= 0 && !pt_readonly_p(old)){
-    printf("BACKUP");
-    pm_backup_page(frame,old);
-      pt_unset_entry(old);
-}
-  pm_download_page(page,frame);
-  pt_set_entry(page,frame);
-  pt_set_readonly(page,1);
-  tlb_add_entry(page,frame,pt_readonly_p(page));
-  virtualmem[frame].pageNum = page;
-  next = (next+1)%NUM_FRAMES;
-  return frame;
-}
 
+    return frame;
+}
 
 
 // NE PAS MODIFIER CETTE FONCTION
-void vmm_clean (void)
-{
-  fprintf (stdout, "VM reads : %4u\n", read_count);
-  fprintf (stdout, "VM writes: %4u\n", write_count);
+void vmm_clean(void) {
+    fprintf(stdout, "VM reads : %4u\n", read_count);
+    fprintf(stdout, "VM writes: %4u\n", write_count);
 }
